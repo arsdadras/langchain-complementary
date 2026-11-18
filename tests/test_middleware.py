@@ -8,7 +8,6 @@ from typing import Annotated, Any, TypedDict
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
-from langcomp.core.nodes import AFTER_AGENT_NODE, BEFORE_AGENT_NODE
 from langgraph.graph.message import add_messages
 
 from langcomp import (
@@ -39,6 +38,7 @@ from langcomp import (
     wrap_model_call,
     wrap_tool_call,
 )
+from langcomp.core.nodes import AFTER_AGENT_NODE, BEFORE_AGENT_NODE
 
 
 @tool

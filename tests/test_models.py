@@ -10,7 +10,6 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langcomp.models import PROVIDERS
 
 from langcomp import (
     CAPABLE_MODEL,
@@ -27,6 +26,7 @@ from langcomp import (
     register_provider,
     resolve_model,
 )
+from langcomp.models import PROVIDERS
 
 
 class _DummyProviderChatModel(BaseChatModel):
