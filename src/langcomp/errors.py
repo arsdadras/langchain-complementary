@@ -1,28 +1,23 @@
-"""Exception hierarchy for langcomp.
+"""Typed exception hierarchy for the langcomp framework.
 
-Every error the framework raises inherits from :class:`LangCompError`, so callers
-can catch everything langcomp raises with a single ``except`` clause while still
-handling specific failure modes when desired.
+Every error raised by langcomp inherits from :class:`LangcompError`, allowing
+callers to catch all framework errors cleanly while still handling specific
+failure modes individually.
 """
 
 from __future__ import annotations
 
 
-class LangCompError(Exception):
-    """Base class for every error raised by langcomp."""
+class LangcompError(Exception):
+    """Base class for all langcomp framework errors."""
 
 
-class ConfigurationError(LangCompError):
-    """The framework was configured in a way it cannot act on."""
+class ConfigurationError(LangcompError):
+    """Raised when langcomp is configured in a way it cannot act on."""
 
 
 class InvalidModelSpecError(ConfigurationError):
-    """A model specification string could not be parsed.
-
-    Args:
-        spec: The specification string that failed to parse.
-        reason: Human-readable explanation of what was wrong with it.
-    """
+    """Raised when a ``"provider:model"`` specification string cannot be parsed."""
 
     def __init__(self, spec: str, reason: str) -> None:
         self.spec = spec
@@ -31,12 +26,7 @@ class InvalidModelSpecError(ConfigurationError):
 
 
 class UnknownProviderError(ConfigurationError):
-    """A model spec named a provider langcomp does not know about.
-
-    Args:
-        provider: The provider name taken from the spec.
-        known: The provider names langcomp currently supports.
-    """
+    """Raised when a model spec names a provider not registered with langcomp."""
 
     def __init__(self, provider: str, known: tuple[str, ...]) -> None:
         self.provider = provider
@@ -47,13 +37,7 @@ class UnknownProviderError(ConfigurationError):
 
 
 class ProviderNotInstalledError(ConfigurationError):
-    """A known provider was requested but its integration package is missing.
-
-    Args:
-        provider: The provider name taken from the spec.
-        module: The Python module that failed to import.
-        extra: The langcomp optional extra that installs the missing package.
-    """
+    """Raised when a known provider's integration SDK package is not installed."""
 
     def __init__(self, provider: str, module: str, extra: str) -> None:
         self.provider = provider
@@ -66,12 +50,7 @@ class ProviderNotInstalledError(ConfigurationError):
 
 
 class MissingApiKeyError(ConfigurationError):
-    """A provider needs an API key and the environment variable holding it is unset.
-
-    Args:
-        provider: The provider name taken from the spec.
-        env_var: The environment variable langcomp looked in.
-    """
+    """Raised when a gateway provider's API key environment variable is unset."""
 
     def __init__(self, provider: str, env_var: str) -> None:
         self.provider = provider
@@ -82,28 +61,24 @@ class MissingApiKeyError(ConfigurationError):
         )
 
 
-class ScriptExhaustedError(LangCompError):
-    """A :class:`~langcomp.devtools.testing.ScriptedFakeChatModel` ran out of responses.
-
-    Args:
-        call_count: How many responses were scripted (and already consumed).
-    """
-
-    def __init__(self, call_count: int) -> None:
-        self.call_count = call_count
-        super().__init__(
-            f"ScriptedFakeChatModel received its {call_count + 1}th call but only "
-            f"{call_count} response(s) were scripted. Add more responses to the script."
-        )
+class ReducerConflictError(LangcompError):
+    """Raised when a State field's reducer configuration is contradictory."""
 
 
-class UnknownToolError(LangCompError):
-    """The model called a tool that was never registered with the agent.
+class SnapshotMismatchError(LangcompError):
+    """Raised when a replayed run's output differs from its recorded snapshot."""
 
-    Args:
-        tool_name: The name the model tried to call.
-        known: The tool names actually registered.
-    """
+
+class ScriptExhaustedError(LangcompError):
+    """Raised when FakeModel is invoked more times than its script provides."""
+
+
+class ApprovalRejectedError(LangcompError):
+    """Raised when an ApprovalGate rejects a tool or function execution."""
+
+
+class UnknownToolError(LangcompError):
+    """Raised when a model requests a tool that is not registered on the agent."""
 
     def __init__(self, tool_name: str, known: tuple[str, ...]) -> None:
         self.tool_name = tool_name

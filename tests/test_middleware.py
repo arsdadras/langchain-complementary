@@ -3,25 +3,29 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+import pytest
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langcomp.core.nodes import AFTER_AGENT_NODE, BEFORE_AGENT_NODE
+from langgraph.graph.message import add_messages
 
 from langcomp import (
     AgentBuilder,
     AgentMiddleware,
     ApprovalGate,
     ApprovalGateMiddleware,
+    ApprovalRejectedError,
     AutoSummarizer,
     AutoSummarizerMiddleware,
     ContextBuffer,
     ContextBufferMiddleware,
+    FakeModel,
     JumpTo,
     ModelRequest,
     ModelResponse,
-    ScriptedFakeChatModel,
+    State,
     ToolCallRequest,
     ToolCallResponse,
     ToolGuard,
@@ -50,7 +54,7 @@ def dangerous_tool(cmd: str) -> str:
 
 
 def test_empty_middleware_behaves_normally() -> None:
-    fake = ScriptedFakeChatModel(responses=[AIMessage(content="Hello world")])
+    fake = FakeModel(script=[AIMessage(content="Hello world")])
     agent = create_agent(model=fake, middleware=[])
 
     result = agent.invoke("Hi")
@@ -62,7 +66,7 @@ def test_empty_middleware_behaves_normally() -> None:
 def test_wrap_model_call_retry_onion() -> None:
     attempts = 0
 
-    class FlakyFakeModel(ScriptedFakeChatModel):
+    class FlakyFakeModel(FakeModel):
         def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
             del input, config, kwargs
             nonlocal attempts
@@ -92,7 +96,12 @@ def test_wrap_model_call_retry_onion() -> None:
             raise last_err
 
     retry_mw = RetryMiddleware(max_retries=3)
-    agent = AgentBuilder("RetryAgent").with_model(FlakyFakeModel(responses=[])).add_middleware(retry_mw).compile()
+    agent = (
+        AgentBuilder("RetryAgent")
+        .with_model(FlakyFakeModel(script=[]))
+        .add_middleware(retry_mw)
+        .compile()
+    )
 
     result = agent.invoke("Go")
 
@@ -102,7 +111,7 @@ def test_wrap_model_call_retry_onion() -> None:
 
 
 def test_wrap_model_call_short_circuit_cache() -> None:
-    fake = ScriptedFakeChatModel(responses=[AIMessage(content="Live response")])
+    fake = FakeModel(script=[AIMessage(content="Live response")])
 
     class CachingMiddleware(AgentMiddleware):
         def wrap_model_call(
@@ -123,7 +132,7 @@ def test_wrap_model_call_short_circuit_cache() -> None:
 
 
 def test_wrap_model_call_request_override() -> None:
-    fake = ScriptedFakeChatModel(responses=["Done"])
+    fake = FakeModel(script=["Done"])
 
     class AugmentPromptMiddleware(AgentMiddleware):
         def wrap_model_call(
@@ -149,8 +158,8 @@ def test_wrap_tool_call_guardrail_and_state_update() -> None:
     class AuditState(TypedDict):
         blocked_count: int
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage(
                 content="",
                 tool_calls=[
@@ -196,6 +205,39 @@ def test_wrap_tool_call_guardrail_and_state_update() -> None:
     assert result["blocked_count"] == 1
 
 
+def test_state_subclass_merges_with_middleware_state_schema() -> None:
+    class AppState(State):
+        messages: Annotated[list[AnyMessage], add_messages] = []
+        tags: list[str] = []
+
+    class MiddlewareExtra(TypedDict):
+        mw_runs: int
+
+    class TaggingMiddleware(AgentMiddleware):
+        state_schema = MiddlewareExtra
+
+        def before_model(self, state: Mapping[str, Any]) -> Mapping[str, Any]:
+            return {
+                "tags": ["checked"],
+                "mw_runs": int(state.get("mw_runs", 0)) + 1,
+            }
+
+    fake = FakeModel(script=["all good"])
+    agent = (
+        AgentBuilder("TypedMiddlewareAgent")
+        .with_state_schema(AppState)
+        .with_model(fake)
+        .add_middleware(TaggingMiddleware())
+        .compile()
+    )
+
+    result = agent.invoke({"messages": ["hi"], "tags": ["init"]})
+
+    assert result["tags"] == ["init", "checked"]
+    assert result["mw_runs"] == 1
+    assert result["messages"][-1].content == "all good"
+
+
 def test_lifecycle_hooks_execution_order() -> None:
     trace: list[str] = []
 
@@ -219,7 +261,7 @@ def test_lifecycle_hooks_execution_order() -> None:
             del state
             trace.append(f"{self.name}.after_agent")
 
-    fake = ScriptedFakeChatModel(responses=["Final response"])
+    fake = FakeModel(script=["Final response"])
     agent = create_agent(model=fake, middleware=[TracingMiddleware("M1"), TracingMiddleware("M2")])
 
     agent.invoke("Hi")
@@ -237,7 +279,7 @@ def test_lifecycle_hooks_execution_order() -> None:
 
 
 def test_before_agent_jump_to_end_skips_model() -> None:
-    fake = ScriptedFakeChatModel(responses=["Should never run"])
+    fake = FakeModel(script=["Should never run"])
     after_agent_called = False
 
     class EarlyGateMiddleware(AgentMiddleware):
@@ -261,7 +303,7 @@ def test_before_agent_jump_to_end_skips_model() -> None:
 
 
 def test_before_model_jump_to_end_short_circuits() -> None:
-    fake = ScriptedFakeChatModel(responses=["Should not be called"])
+    fake = FakeModel(script=["Should not be called"])
 
     class LimitMiddleware(AgentMiddleware):
         def before_model(self, state: Mapping[str, Any]) -> JumpTo | None:
@@ -287,8 +329,8 @@ def test_after_model_jump_to_end_cancels_tool_execution() -> None:
         tool_executed = True
         return "executed"
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage("", tool_calls=[{"id": "c1", "name": "side_effect_tool", "args": {}}]),
         ]
     )
@@ -312,8 +354,8 @@ def test_middleware_contributes_tools_and_state_schema() -> None:
     class CounterState(TypedDict):
         echo_calls: int
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage(
                 content="",
                 tool_calls=[{"id": "c1", "name": "echo_tool", "args": {"text": "langcomp"}}],
@@ -372,14 +414,12 @@ def test_functional_decorators_and_no_spurious_lifecycle_nodes() -> None:
     def make_prompt(req: ModelRequest) -> str:
         return f"Dynamic prompt for {len(req.messages)} msg(s)"
 
-    fake = ScriptedFakeChatModel(responses=["sniffed"])
+    fake = FakeModel(script=["sniffed"])
     agent = create_agent(
         model=fake,
         middleware=[log_before, log_after, wrap_model, make_prompt],
     )
 
-    # None of the decorators above declared before_agent or after_agent, so those
-    # graph nodes must not be added unnecessarily.
     node_names = set(agent.graph.nodes)
     assert BEFORE_AGENT_NODE not in node_names
     assert AFTER_AGENT_NODE not in node_names
@@ -412,8 +452,8 @@ def test_before_and_after_agent_decorators_and_wrap_tool_decorator() -> None:
         del state
         trace.append("end")
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage("", tool_calls=[{"id": "c1", "name": "echo_tool", "args": {"text": "hi"}}]),
             AIMessage("done"),
         ]
@@ -430,7 +470,7 @@ def test_before_and_after_agent_decorators_and_wrap_tool_decorator() -> None:
 
 
 def test_context_buffer_middleware_trims_model_input_only() -> None:
-    fake = ScriptedFakeChatModel(responses=["trimmed reply"])
+    fake = FakeModel(script=["trimmed reply"])
     agent = create_agent(
         model=fake,
         middleware=[ContextBufferMiddleware(ContextBuffer(max_messages=3))],
@@ -441,12 +481,11 @@ def test_context_buffer_middleware_trims_model_input_only() -> None:
 
     assert len(fake.calls[0]) == 3
     assert [m.content for m in fake.calls[0]] == ["msg 3", "msg 4", "msg 5"]
-    # Full conversation history remains intact in persisted graph state.
     assert len(result["messages"]) == 7
 
 
 def test_auto_summarizer_middleware_compresses_long_history() -> None:
-    fake = ScriptedFakeChatModel(responses=["summarized reply"])
+    fake = FakeModel(script=["summarized reply"])
     summarizer = AutoSummarizer(trigger_threshold=4, keep_recent=2)
     agent = create_agent(
         model=fake,
@@ -479,8 +518,8 @@ def test_tool_guard_middleware_retries_and_recovers() -> None:
             raise RuntimeError("temporary failure")
         return x * 10
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage("", tool_calls=[{"id": "c1", "name": "flaky_tool", "args": {"x": 4}}]),
             AIMessage("Result is 40."),
         ]
@@ -489,9 +528,7 @@ def test_tool_guard_middleware_retries_and_recovers() -> None:
         model=fake,
         tools=[flaky_tool],
         middleware=[
-            ToolGuardMiddleware(
-                ToolGuard(max_retries=3, retry_delay_seconds=0.0)
-            )
+            ToolGuardMiddleware(ToolGuard(max_retries=3, retry_delay_seconds=0.0)),
         ],
     )
 
@@ -509,8 +546,8 @@ def test_tool_guard_middleware_returns_fallback_after_exhausting_retries() -> No
         """Always fails."""
         raise RuntimeError("permanent failure")
 
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage("", tool_calls=[{"id": "c1", "name": "always_broken", "args": {}}]),
             AIMessage("Used fallback."),
         ]
@@ -535,10 +572,38 @@ def test_tool_guard_middleware_returns_fallback_after_exhausting_retries() -> No
     assert tool_msg.content == "cached-safe-default"
 
 
+def test_tool_guard_middleware_never_retries_approval_rejection() -> None:
+    checks = 0
+
+    def deny(_name: str, _args: dict[str, Any]) -> bool:
+        nonlocal checks
+        checks += 1
+        return False
+
+    fake = FakeModel(
+        script=[
+            AIMessage("", tool_calls=[{"id": "c1", "name": "dangerous_tool", "args": {"cmd": "x"}}]),
+            AIMessage("Stopped."),
+        ]
+    )
+    agent = create_agent(
+        model=fake,
+        tools=[dangerous_tool],
+        middleware=[
+            ToolGuardMiddleware(max_retries=3, fallback_output="should-not-use", retry_delay_seconds=0.0),
+            ApprovalGateMiddleware(ApprovalGate(approval_func=deny), raise_on_reject=True),
+        ],
+    )
+
+    with pytest.raises(ApprovalRejectedError):
+        agent.invoke("run")
+    assert checks == 1
+
+
 def test_approval_gate_middleware_blocks_unapproved_and_allows_approved() -> None:
     gate = ApprovalGate(approval_func=lambda name, args: args.get("cmd") != "rm -rf /")
-    fake = ScriptedFakeChatModel(
-        responses=[
+    fake = FakeModel(
+        script=[
             AIMessage(
                 "",
                 tool_calls=[

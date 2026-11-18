@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
+from langcomp.errors import ApprovalRejectedError
 from langcomp.memory.buffer import AutoSummarizer, ContextBuffer
 from langcomp.middleware.base import AgentMiddleware
 from langcomp.middleware.types import (
@@ -87,7 +88,8 @@ class ToolGuardMiddleware(AgentMiddleware):
     """Retries failing tool executions using a :class:`~langcomp.tools.guard.ToolGuard` policy.
 
     Intercepts both raised exceptions and error :class:`~langchain_core.messages.ToolMessage`
-    responses returned by the core tool invoker.
+    responses returned by the core tool invoker. Never retries
+    :class:`~langcomp.errors.ApprovalRejectedError`.
     """
 
     def __init__(
@@ -116,11 +118,17 @@ class ToolGuardMiddleware(AgentMiddleware):
         for attempt in range(1, attempts + 1):
             try:
                 response = handler(request)
+            except ApprovalRejectedError:
+                raise
             except Exception as exc:  # noqa: BLE001 - retry policy intentionally catches any tool error
                 last_error = exc
                 last_response = None
             else:
                 if response.message.status != "error":
+                    return response
+                if isinstance(response.message.content, str) and response.message.content.startswith(
+                    "ApprovalRejectedError:"
+                ):
                     return response
                 last_response = response
                 last_error = None
@@ -131,7 +139,7 @@ class ToolGuardMiddleware(AgentMiddleware):
         if self.guard.fallback_output is not None:
             return ToolCallResponse(
                 message=ToolMessage(
-                    content=self.guard.fallback_output,
+                    content=str(self.guard.fallback_output),
                     tool_call_id=request.tool_call["id"],
                 )
             )
@@ -154,6 +162,8 @@ class ApprovalGateMiddleware(AgentMiddleware):
         guarded_tools: Optional allowlist of tool names requiring approval. When
             omitted, every tool call is checked against ``gate``.
         denial_message: Custom message template when a call is rejected.
+        raise_on_reject: When ``True``, raises :class:`ApprovalRejectedError`
+            instead of returning an error :class:`ToolMessage`.
     """
 
     def __init__(
@@ -162,10 +172,12 @@ class ApprovalGateMiddleware(AgentMiddleware):
         *,
         guarded_tools: Sequence[str] | None = None,
         denial_message: str = "PermissionDenied: tool '{tool_name}' was rejected by approval gate.",
+        raise_on_reject: bool = False,
     ) -> None:
         self.gate = gate
         self.guarded_tools = frozenset(guarded_tools) if guarded_tools is not None else None
         self.denial_message = denial_message
+        self.raise_on_reject = raise_on_reject
 
     def wrap_tool_call(
         self,
@@ -178,9 +190,12 @@ class ApprovalGateMiddleware(AgentMiddleware):
 
         args = dict(request.tool_call.get("args", {}))
         if not self.gate.check_approval(tool_name, args):
+            msg = self.denial_message.format(tool_name=tool_name)
+            if self.raise_on_reject:
+                raise ApprovalRejectedError(msg)
             return ToolCallResponse(
                 message=ToolMessage(
-                    content=self.denial_message.format(tool_name=tool_name),
+                    content=msg,
                     tool_call_id=request.tool_call["id"],
                     status="error",
                 )

@@ -3,7 +3,7 @@ Example 03: Tool Guardrails & Human Approval Gates.
 Demonstrates wrapping flaky tools with automatic retries and fallback outputs.
 """
 
-from langcomp import ToolGuard, ApprovalGate
+from langcomp import ApprovalGate, ToolGuard
 
 attempt_counter = 0
 

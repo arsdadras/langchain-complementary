@@ -23,7 +23,7 @@ from langcomp.core.nodes import (
     make_call_model_node,
     make_tool_node,
 )
-from langcomp.core.state import SmartState
+from langcomp.core.state import SmartState, merge_state_schemas
 from langcomp.middleware.base import AgentMiddleware
 from langcomp.middleware.compose import (
     compose_model_wrappers,
@@ -75,7 +75,7 @@ def create_agent_graph(
             decorated hook functions.
         extra_state_fields: Optional extra state field annotations merged into
             the generated ``SmartState`` schema.
-        state_schema: Optional explicit state schema to use instead of generating one.
+        state_schema: Optional explicit base state schema to extend with middleware schemas.
         checkpointer: Optional LangGraph checkpointer for state persistence.
         **model_kwargs: Extra kwargs forwarded to :func:`resolve_model` when
             ``model`` is a string or ``None``.
@@ -95,10 +95,13 @@ def create_agent_graph(
         combined_tools.extend(normalize_tools(mw.tools))
 
     middleware_schemas = [mw.state_schema for mw in mw_list if mw.state_schema is not None]
-    resolved_schema = state_schema or SmartState.create_schema(
-        extra_fields=extra_state_fields,
-        schemas=middleware_schemas,
-    )
+    if state_schema is not None:
+        resolved_schema = merge_state_schemas(state_schema, middleware_schemas)
+    else:
+        resolved_schema = SmartState.create_schema(
+            extra_fields=extra_state_fields,
+            schemas=middleware_schemas,
+        )
 
     has_tools = bool(combined_tools)
     if has_tools and hasattr(resolved_model, "bind_tools"):
@@ -116,7 +119,7 @@ def create_agent_graph(
             return ToolCallResponse(
                 message=ToolMessage(content=str(output), tool_call_id=tr.tool_call["id"])
             )
-        except Exception as exc:  # noqa: BLE001 - convert any runtime tool error into a recoverable ToolMessage
+        except Exception as exc:  # noqa: BLE001 - convert runtime tool errors into recoverable ToolMessage
             content = f"{type(exc).__name__}: {exc}"
             return ToolCallResponse(
                 message=ToolMessage(

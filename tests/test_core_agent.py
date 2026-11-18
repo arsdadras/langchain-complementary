@@ -2,11 +2,11 @@
 Unit tests for langcomp.core.agent and SmartState.
 """
 
-import pytest
-from langchain_core.messages import HumanMessage, AIMessage
-from langgraph.graph import START, END
-from langcomp.core.state import SmartState
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import END, START
+
 from langcomp.core.agent import AgentBuilder, agent
+from langcomp.core.state import SmartState
 
 
 def test_smart_state_normalization():

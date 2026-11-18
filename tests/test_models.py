@@ -16,11 +16,11 @@ from langcomp import (
     CAPABLE_MODEL,
     DEFAULT_MODEL,
     ConfigurationError,
+    FakeModel,
     InvalidModelSpecError,
     MissingApiKeyError,
     ProviderNotInstalledError,
     ProviderSpec,
-    ScriptedFakeChatModel,
     UnknownProviderError,
     known_providers,
     parse_model_spec,
@@ -83,7 +83,7 @@ def test_default_and_capable_models_are_known() -> None:
 
 
 def test_resolve_model_passes_through_existing_chat_model() -> None:
-    fake = ScriptedFakeChatModel(responses=["hi"])
+    fake = FakeModel(script=["hi"])
     assert resolve_model(fake) is fake
 
 

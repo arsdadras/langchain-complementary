@@ -1,24 +1,24 @@
-"""langcomp: LangChain-Complementary Framework.
-
-High-level, developer-friendly abstractions on top of LangChain, LangGraph,
-and DeepAgents.
+"""
+langcomp: LangChain-Complementary Framework
+High-level, developer-friendly abstractions on top of LangChain, LangGraph, and DeepAgents.
 """
 
-from __future__ import annotations
+__version__ = "0.2.0"
 
-__version__ = "0.1.0"
-
-from langcomp.core.agent import Agent, AgentBuilder, agent, create_agent
-from langcomp.core.state import SmartState
-from langcomp.devtools.testing import ScriptedFakeChatModel
+from langcomp.core.agent import Agent, AgentBuilder, Node, agent, create_agent, node
+from langcomp.core.state import Reduce, SmartState, State, merge_dicts, overwrite
+from langcomp.devtools.trace import DEFAULT_PRICE_TABLE, TraceCollector, summarize
 from langcomp.devtools.visualizer import DryRunner, GraphVisualizer
 from langcomp.errors import (
+    ApprovalRejectedError,
     ConfigurationError,
     InvalidModelSpecError,
-    LangCompError,
+    LangcompError,
     MissingApiKeyError,
     ProviderNotInstalledError,
+    ReducerConflictError,
     ScriptExhaustedError,
+    SnapshotMismatchError,
     UnknownProviderError,
     UnknownToolError,
 )
@@ -53,57 +53,85 @@ from langcomp.models import (
     register_provider,
     resolve_model,
 )
+from langcomp.persistence import checkpointer
 from langcomp.swarm.pool import SubAgent, SwarmPool
+from langcomp.swarm.team import Team
+from langcomp.testing import FakeModel, run_and_snapshot
 from langcomp.tools.guard import ApprovalGate, ToolGuard
 
 __all__ = [
-    "CAPABLE_MODEL",
-    "DEFAULT_MODEL",
+    "__version__",
+    # Core Agent & Graph
     "Agent",
     "AgentBuilder",
-    "AgentMiddleware",
-    "ApprovalGate",
-    "ApprovalGateMiddleware",
-    "AutoSummarizer",
-    "AutoSummarizerMiddleware",
-    "ConfigurationError",
-    "ContextBuffer",
-    "ContextBufferMiddleware",
-    "DryRunner",
-    "GraphVisualizer",
-    "InvalidModelSpecError",
-    "JumpTo",
-    "LangCompError",
-    "MissingApiKeyError",
-    "ModelHandler",
-    "ModelRequest",
-    "ModelResponse",
-    "ProviderNotInstalledError",
-    "ProviderSpec",
-    "ScriptExhaustedError",
-    "ScriptedFakeChatModel",
-    "SmartState",
-    "SubAgent",
-    "SwarmPool",
-    "ToolCallRequest",
-    "ToolCallResponse",
-    "ToolGuard",
-    "ToolGuardMiddleware",
-    "ToolHandler",
-    "UnknownProviderError",
-    "UnknownToolError",
-    "__version__",
-    "after_agent",
-    "after_model",
-    "agent",
-    "before_agent",
-    "before_model",
     "create_agent",
-    "dynamic_prompt",
+    "agent",
+    "node",
+    "Node",
+    # State & Reducers
+    "State",
+    "SmartState",
+    "Reduce",
+    "overwrite",
+    "merge_dicts",
+    # Models & Lazy Provider Registry
+    "DEFAULT_MODEL",
+    "CAPABLE_MODEL",
+    "ProviderSpec",
     "known_providers",
     "parse_model_spec",
     "register_provider",
     "resolve_model",
+    # Onion Middleware & Built-in Adapters
+    "AgentMiddleware",
+    "JumpTo",
+    "ModelHandler",
+    "ModelRequest",
+    "ModelResponse",
+    "ToolCallRequest",
+    "ToolCallResponse",
+    "ToolHandler",
+    "before_agent",
+    "before_model",
     "wrap_model_call",
+    "after_model",
     "wrap_tool_call",
+    "after_agent",
+    "dynamic_prompt",
+    "ContextBufferMiddleware",
+    "AutoSummarizerMiddleware",
+    "ToolGuardMiddleware",
+    "ApprovalGateMiddleware",
+    # Swarm & Hierarchical Teams
+    "SwarmPool",
+    "SubAgent",
+    "Team",
+    # Memory & Context
+    "ContextBuffer",
+    "AutoSummarizer",
+    # Tools & Guardrails
+    "ToolGuard",
+    "ApprovalGate",
+    # Persistence
+    "checkpointer",
+    # DevTools, Tracing & Testing
+    "GraphVisualizer",
+    "DryRunner",
+    "TraceCollector",
+    "DEFAULT_PRICE_TABLE",
+    "summarize",
+    "FakeModel",
+    "run_and_snapshot",
+    # Errors
+    "LangcompError",
+    "ConfigurationError",
+    "InvalidModelSpecError",
+    "UnknownProviderError",
+    "ProviderNotInstalledError",
+    "MissingApiKeyError",
+    "ReducerConflictError",
+    "SnapshotMismatchError",
+    "ScriptExhaustedError",
+    "ApprovalRejectedError",
+    "UnknownToolError",
 ]

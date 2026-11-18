@@ -1,7 +1,7 @@
-"""Offline example: AgentBuilder with onion middleware, built-in adapters, and ScriptedFakeChatModel.
+"""Example 06: Onion middleware, built-in adapters, FakeModel, and local TraceCollector.
 
-Run without any API keys:
-    python examples/04_middleware_and_offline_testing.py
+Runs completely offline with zero API keys:
+    python examples/06_middleware_and_lazy_models.py
 """
 
 from __future__ import annotations
@@ -14,11 +14,13 @@ from langcomp import (
     ApprovalGate,
     ApprovalGateMiddleware,
     ContextBufferMiddleware,
+    FakeModel,
     GraphVisualizer,
     ModelRequest,
-    ScriptedFakeChatModel,
     ToolGuardMiddleware,
+    TraceCollector,
     dynamic_prompt,
+    summarize,
 )
 
 
@@ -40,16 +42,20 @@ def contextual_prompt(req: ModelRequest) -> str:
 
 
 def main() -> None:
-    fake_model = ScriptedFakeChatModel(
-        responses=[
+    fake_model = FakeModel(
+        script=[
             AIMessage(
                 content="",
                 tool_calls=[
                     {"id": "call_1", "name": "add", "args": {"a": 17, "b": 25}},
                     {"id": "call_2", "name": "delete_records", "args": {"table": "users"}},
                 ],
+                usage_metadata={"input_tokens": 60, "output_tokens": 25, "total_tokens": 85},
             ),
-            AIMessage(content="17 + 25 = 42, and delete_records was safely blocked."),
+            AIMessage(
+                content="17 + 25 = 42, and delete_records was safely blocked.",
+                usage_metadata={"input_tokens": 90, "output_tokens": 20, "total_tokens": 110},
+            ),
         ]
     )
 
@@ -70,8 +76,13 @@ def main() -> None:
         .compile()
     )
 
-    result = agent.invoke("Add 17 and 25, and also clear the users table.")
+    collector = TraceCollector(out_dir=None)
+    result = agent.invoke(
+        "Add 17 and 25, and also clear the users table.",
+        config={"callbacks": [collector]},
+    )
     print("Final answer:", result["messages"][-1].content)
+    print("Trace summary:", summarize(collector))
     print("\nGraph Mermaid:\n")
     print(GraphVisualizer.to_mermaid(agent))
 
