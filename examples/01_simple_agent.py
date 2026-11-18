@@ -4,6 +4,7 @@ Demonstrates building stateful agents without graph ceremony.
 """
 
 from langchain_core.messages import AIMessage
+
 from langcomp import AgentBuilder, GraphVisualizer
 
 
@@ -37,7 +38,7 @@ def main():
     # Invoke agent
     print("\n--- Invoking Agent ---")
     result = agent.invoke("Market trend analysis Q3")
-    
+
     print("\n--- Execution History ---")
     for msg in result["messages"]:
         print(f"[{msg.__class__.__name__}]: {msg.content}")

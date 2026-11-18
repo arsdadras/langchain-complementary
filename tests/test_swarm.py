@@ -3,8 +3,9 @@ Unit tests for langcomp.swarm.pool.
 """
 
 from langchain_core.messages import AIMessage
+
 from langcomp.core.agent import AgentBuilder
-from langcomp.swarm.pool import SwarmPool, SubAgent
+from langcomp.swarm.pool import SwarmPool
 
 
 def test_swarm_pool_registration_and_execution():

@@ -2,8 +2,7 @@
 Unit tests for langcomp.tools.guard.
 """
 
-import pytest
-from langcomp.tools.guard import ToolGuard, ApprovalGate
+from langcomp.tools.guard import ApprovalGate, ToolGuard
 
 
 def test_tool_guard_retry_and_fallback():

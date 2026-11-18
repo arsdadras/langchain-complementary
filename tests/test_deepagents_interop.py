@@ -3,7 +3,8 @@ Unit tests for DeepAgents and modern LangChain create_agent interop.
 """
 
 from langchain_core.messages import AIMessage
-from langcomp import Agent, AgentBuilder, SwarmPool, SubAgent
+
+from langcomp import Agent, SwarmPool
 
 
 def test_agent_from_runnable():

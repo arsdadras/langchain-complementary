@@ -26,8 +26,13 @@ MANIFEST
 .coverage
 htmlcov/
 
-# Environments
-.env.local
+# Local traces & snapshots
+.langcomp/
+
+# Environments & Secrets
+.env
+.env.*
+!.env.example
 .venv
 env/
 venv/

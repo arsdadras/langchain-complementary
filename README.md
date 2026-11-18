@@ -4,69 +4,144 @@
 [![LangGraph Compatible](https://img.shields.io/badge/LangGraph-100%25%20Compatible-green.svg)](https://docs.langchain.com/oss/python/langgraph/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**`langcomp`** is an elegant, developer-friendly, and high-performance complementary framework built on top of [LangChain](https://docs.langchain.com), [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview), and [DeepAgents](https://docs.langchain.com/oss/python/deepagents/overview). 
+**`langcomp`** is a lightweight, developer-friendly complementary framework built on top of [LangChain](https://docs.langchain.com), [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview), and [DeepAgents](https://docs.langchain.com/oss/python/deepagents/overview).
 
-It addresses common developer friction points in the LangChain ecosystem—eliminating verbose graph wiring, simplifying multi-agent swarm delegation, providing automatic context token compression, adding robust tool execution guardrails, and enabling zero-cloud local graph visualization and E2E unit testing.
-
----
-
-## 🌟 Key Features
-
-1. **Declarative Agent Blueprint (`AgentBuilder`, `@agent`)**
-   - Define nodes, tools, and execution flows in concise, Pythonic code.
-   - Zero boilerplate TypedDict or manual reducer code.
-   - 100% compatible with native `LangGraph` runtimes and `LangSmith` tracing.
-
-2. **Smart Swarm & Subagent Pool (`SwarmPool`)**
-   - Register subagents with instructions and capability tags.
-   - Automatic context-isolated subagent tools for multi-agent delegation without context window bloat.
-
-3. **Automatic Context & Memory Engine (`ContextBuffer`, `AutoSummarizer`)**
-   - Prevents LLM context overflow errors.
-   - Automatic sliding-window message trimming and background conversation summarization.
-
-4. **Tool Guardrails & Approval Gates (`ToolGuard`, `ApprovalGate`)**
-   - Automatic retries, fallback outputs, and schema validation for tools.
-   - Simplified 1-line Human-In-The-Loop approval gates.
-
-5. **Local DevTools & Visualizer (`GraphVisualizer`, `DryRunner`)**
-   - Zero-dependency ASCII and Mermaid graph diagram generator.
-   - Dry-run step runner for offline testing of agent node state transitions without API calls.
+It eliminates common developer friction points across the LangChain/LangGraph ecosystem without replacing the underlying runtimes: declarative graph wiring, automatic state reducers, deterministic offline testing with `FakeModel` and golden-master snapshots, zero-SaaS local token/cost tracing, resilient sync/async tool guardrails, durability-aware checkpointers, and hierarchical subagent teams.
 
 ---
 
-## 📦 Installation
+## Key Features
+
+1. **Declarative Agent Blueprint (`AgentBuilder`, `@agent`, `@node`)**
+   - Fluent graph construction with automatic linear edge chaining, duplicate node checks, and edge validation.
+   - Sync/async invocation and streaming (`invoke`, `ainvoke`, `stream`, `astream`, `get_state`).
+   - `@node(idempotent=True)` for at-most-once-per-thread execution across LangGraph `interrupt()` resumes, plus `Node.invoke_for_test()`.
+   - Seamless interop via `Agent.from_runnable(...)` for any LangChain `create_agent()` or DeepAgents runnable.
+
+2. **Smart State & Automatic Reducers (`State`, `Reduce`, `SmartState`)**
+   - `State(BaseModel)` automatically infers reducers (`list` -> `operator.add`, `dict` -> `merge_dicts`, scalars -> `overwrite`), supports custom `Reduce(fn)` overrides, and exposes `State.explain()` + `State.to_typed_dict()`.
+   - `SmartState` dynamically generates `TypedDict` schemas with `add_messages` and normalizes raw strings/dicts into LangChain messages.
+
+3. **Deterministic Offline Testing (`FakeModel`, `run_and_snapshot`, `DryRunner`)**
+   - `FakeModel(BaseChatModel)`: scripted multi-turn chat double supporting `tool_calls` and `usage_metadata` with zero network calls.
+   - `run_and_snapshot()`: records clean JSON snapshots on first run and raises `SnapshotMismatchError` on output drift.
+   - `DryRunner`: executes individual compiled graph nodes directly against state dictionaries.
+
+4. **Zero-Cloud Local Observability (`TraceCollector`, `summarize`, `GraphVisualizer`)**
+   - `TraceCollector(BaseCallbackHandler)` logs per-node latency, input/output tokens, estimated USD cost, and `langgraph_checkpoint_ns` subagent depth to local `.jsonl` files.
+   - `GraphVisualizer.to_mermaid()` and zero-dependency `GraphVisualizer.to_ascii()` diagram exporters.
+
+5. **Swarm & Hierarchical Subagent Teams (`SwarmPool`, `SubAgent`, `Team`)**
+   - `SwarmPool` wraps agents or callables as context-isolated LangChain tools or DeepAgents subagent dicts.
+   - `Team` composes arbitrarily nested DeepAgents subagent trees with uniform transitive field inheritance (`system_prompt`, `tools`, `model`, `skills`, `middleware`).
+
+6. **Memory, Guardrails & Durability (`ContextBuffer`, `AutoSummarizer`, `ToolGuard`, `ApprovalGate`, `checkpointer`)**
+   - Sliding-window message trimming and automatic conversation summarization.
+   - Sync/async `ToolGuard` retries + fallbacks and `ApprovalGate` enforcement (Pydantic v2 `BaseTool` safe).
+   - `checkpointer("memory" | "sqlite" | "postgres")` preset factory with explicit durability warning for in-memory state.
+
+---
+
+## Installation
 
 ```bash
+# Core framework (langchain-core, langgraph, pydantic)
 pip install -e .
+
+# Optional extras
+pip install -e ".[sqlite]"       # SQLite checkpointer
+pip install -e ".[postgres]"     # PostgreSQL checkpointer
+pip install -e ".[deepagents]"   # Hierarchical Team compilation
+pip install -e ".[visualizer]"   # Enhanced ASCII graphs via grandalf
+pip install -e ".[dev]"          # Testing & linting tools
 ```
 
 ---
 
-## 🚀 Quickstart
+## Quickstart
+
+### 1. Declarative Agent with Typed Reducers & `@node`
 
 ```python
-from langcomp import AgentBuilder, SmartState
-from langchain_core.messages import AIMessage
+from langcomp import AgentBuilder, State, Reduce, node
 
-# Define custom node functions effortlessly
-def analyze_node(state):
-    query = state["messages"][-1].content
-    return {"messages": [AIMessage(content=f"Analyzed: {query}")]}
+class ResearchState(State):
+    notes: list[str] = []
+    metadata: dict[str, str] = {}
+    score: int = Reduce(lambda a, b: max(a or 0, b or 0), default=0)
 
-# Build agent with fluent API
+@node
+def gather(state):
+    return {"notes": ["collected data"], "metadata": {"stage": "gather"}, "score": 8}
+
+@node
+def refine(state):
+    return {"notes": ["verified facts"], "metadata": {"reviewed": "true"}, "score": 5}
+
 agent = (
-    AgentBuilder("DataAnalyzer")
-    .add_node("analyze", analyze_node)
+    AgentBuilder("ResearchAgent")
+    .with_state_schema(ResearchState)
+    .add_node(gather)
+    .add_node(refine)
     .compile()
 )
 
-result = agent.invoke("Analyze quarterly revenue metrics.")
+result = agent.invoke({"notes": [], "metadata": {}, "score": 0})
+print(result["notes"])     # ['collected data', 'verified facts']
+print(result["metadata"])  # {'stage': 'gather', 'reviewed': 'true'}
+print(result["score"])     # 8
+```
+
+### 2. Offline ReAct Agent Testing & Local Tracing
+
+```python
+from langchain_core.messages import AIMessage
+from langchain_core.tools import tool
+from langcomp import AgentBuilder, FakeModel, TraceCollector, summarize
+
+@tool
+def multiply(a: int, b: int) -> int:
+    """Multiply two integers."""
+    return a * b
+
+model = FakeModel(script=[
+    AIMessage(
+        content="",
+        tool_calls=[{"name": "multiply", "args": {"a": 6, "b": 7}, "id": "call_1"}],
+        usage_metadata={"input_tokens": 50, "output_tokens": 20, "total_tokens": 70},
+    ),
+    AIMessage(
+        content="6 * 7 = 42.",
+        usage_metadata={"input_tokens": 80, "output_tokens": 15, "total_tokens": 95},
+    ),
+])
+
+agent = AgentBuilder("MathAgent").with_model(model).with_tools([multiply]).compile()
+collector = TraceCollector(out_dir=None)  # in-memory tracing
+
+result = agent.invoke("What is 6 * 7?", config={"callbacks": [collector]})
 print(result["messages"][-1].content)
+print(summarize(collector))
 ```
 
 ---
 
-## 📄 License
+## Examples & Docs
 
-MIT License. Developed by AR_S.DADRAS.
+- Runnable offline examples live in [`examples/`](./examples/)
+- Full step-by-step tutorial chapters live in [`docs/tutorial/`](./docs/tutorial/index.md)
+
+---
+
+## Development
+
+```bash
+uv run pytest -v
+ruff check src tests examples
+```
+
+---
+
+## License
+
+MIT License. See [LICENSE](./LICENSE). Developed by AR_S.DADRAS.

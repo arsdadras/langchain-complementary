@@ -2,8 +2,9 @@
 Unit tests for langcomp.memory.buffer.
 """
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langcomp.memory.buffer import ContextBuffer, AutoSummarizer
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from langcomp.memory.buffer import AutoSummarizer, ContextBuffer
 
 
 def test_context_buffer_trimming():

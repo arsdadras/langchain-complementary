@@ -4,6 +4,7 @@ Demonstrates SwarmPool subagent registration and context-isolated subagent tool 
 """
 
 from langchain_core.messages import AIMessage
+
 from langcomp import AgentBuilder, SwarmPool
 
 

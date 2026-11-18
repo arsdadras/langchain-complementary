@@ -3,8 +3,9 @@ Unit tests for langcomp.devtools.visualizer.
 """
 
 from langchain_core.messages import AIMessage
+
 from langcomp.core.agent import AgentBuilder
-from langcomp.devtools.visualizer import GraphVisualizer, DryRunner
+from langcomp.devtools.visualizer import DryRunner, GraphVisualizer
 
 
 def test_graph_visualizer_mermaid():
