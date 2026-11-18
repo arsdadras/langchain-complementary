@@ -29,9 +29,17 @@ It addresses common developer friction points in the LangChain ecosystem—elimi
    - Automatic retries, fallback outputs, and schema validation for tools.
    - Simplified 1-line Human-In-The-Loop approval gates.
 
-5. **Local DevTools & Visualizer (`GraphVisualizer`, `DryRunner`)**
+5. **Local DevTools & Offline Testing (`GraphVisualizer`, `DryRunner`, `ScriptedFakeChatModel`)**
    - Zero-dependency ASCII and Mermaid graph diagram generator.
-   - Dry-run step runner for offline testing of agent node state transitions without API calls.
+   - Dry-run step runner and deterministic `ScriptedFakeChatModel` for network-free, multi-turn tool-calling tests.
+
+6. **Dual-Mechanism Onion Middleware (`AgentMiddleware`, `@before_model`, `@wrap_model_call`, `@dynamic_prompt`)**
+   - Composable lifecycle hooks (`before_agent`, `before_model`, `after_model`, `after_agent`) with typed `JumpTo` early exits.
+   - Immutable onion wrappers (`ModelRequest`, `ToolCallRequest`) with built-in adapters (`ContextBufferMiddleware`, `AutoSummarizerMiddleware`, `ToolGuardMiddleware`, `ApprovalGateMiddleware`).
+
+7. **Lazy Provider Registry (`resolve_model`, `register_provider`) & Structured Errors (`LangCompError`)**
+   - Resolve `"provider:model"` specs (`openai:...`, `google_genai:...`, `openrouter:...`) lazily without pulling in unused SDKs.
+   - Typed exception hierarchy (`LangCompError`, `ConfigurationError`, `InvalidModelSpecError`, `MissingApiKeyError`, `ScriptExhaustedError`, `UnknownToolError`).
 
 ---
 
