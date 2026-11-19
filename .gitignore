@@ -21,8 +21,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Pytest & Coverage
+# Pytest, Linters & Coverage
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
 

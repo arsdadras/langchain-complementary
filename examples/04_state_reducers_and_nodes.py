@@ -1,9 +1,11 @@
 """
-Example 01: Declarative agents, automatic State reducers, and @node decorators.
+Example 04: Declarative agents, automatic State reducers, and @node decorators.
 Runs completely offline with zero API keys.
 """
 
-from typing import Any, Dict, List
+from __future__ import annotations
+
+from typing import Any
 
 from langcomp import AgentBuilder, Reduce, State, node
 
@@ -13,13 +15,14 @@ def _keep_max(a: int, b: int) -> int:
 
 
 class AnalysisState(State):
-    findings: List[str] = []
-    tags: Dict[str, str] = {}
+    findings: list[str] = []
+    tags: dict[str, str] = {}
     confidence: int = Reduce(_keep_max, default=0)
 
 
 @node
-def collect_metrics(state: Dict[str, Any]) -> Dict[str, Any]:
+def collect_metrics(state: dict[str, Any]) -> dict[str, Any]:
+    del state
     return {
         "findings": ["Q3 revenue up 18%"],
         "tags": {"region": "EMEA"},
@@ -28,7 +31,8 @@ def collect_metrics(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @node
-def verify_metrics(state: Dict[str, Any]) -> Dict[str, Any]:
+def verify_metrics(state: dict[str, Any]) -> dict[str, Any]:
+    del state
     return {
         "findings": ["Churn decreased 2.1%"],
         "tags": {"audited": "true"},
@@ -47,7 +51,7 @@ def main() -> None:
         .compile()
     )
 
-    result = agent.invoke({"findings": [], "tags": {}, "confidence": 0})
+    result = agent.invoke({})
     print("Findings:", result["findings"])
     print("Tags:", result["tags"])
     print("Max confidence:", result["confidence"])

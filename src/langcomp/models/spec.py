@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from langcomp.errors import InvalidModelSpecError
+from langcomp.errors import ConfigurationError, InvalidModelSpecError
 from langcomp.models.constants import SPEC_SEPARATOR
 
 
@@ -23,6 +23,7 @@ class ProviderSpec:
         api_key_env: Optional environment variable holding this provider's API key.
             When set, langcomp reads and passes it explicitly so gateway providers
             never silently pick up another provider's key.
+        api_key_kwarg: Constructor argument name that receives the API key.
         defaults: Default constructor arguments applied unless overridden by caller.
     """
 
@@ -31,7 +32,20 @@ class ProviderSpec:
     extra: str
     model_kwarg: str = "model"
     api_key_env: str | None = None
+    api_key_kwarg: str = "api_key"
     defaults: Mapping[str, Any] = MappingProxyType({})
+
+    def __post_init__(self) -> None:
+        if not self.module or not self.module.strip():
+            raise ConfigurationError("ProviderSpec.module must not be empty.")
+        if not self.class_name or not self.class_name.strip():
+            raise ConfigurationError("ProviderSpec.class_name must not be empty.")
+        if not self.model_kwarg or not self.model_kwarg.strip():
+            raise ConfigurationError("ProviderSpec.model_kwarg must not be empty.")
+        if not self.api_key_kwarg or not self.api_key_kwarg.strip():
+            raise ConfigurationError("ProviderSpec.api_key_kwarg must not be empty.")
+        if not isinstance(self.defaults, MappingProxyType):
+            object.__setattr__(self, "defaults", MappingProxyType(dict(self.defaults)))
 
 
 def parse_model_spec(spec: str) -> tuple[str, str]:
@@ -45,9 +59,13 @@ def parse_model_spec(spec: str) -> tuple[str, str]:
         A ``(provider, model_id)`` pair with surrounding whitespace stripped.
 
     Raises:
-        InvalidModelSpecError: If ``spec`` is empty, missing the separator, or
-            has an empty provider or model segment.
+        InvalidModelSpecError: If ``spec`` is not a string, is empty, missing the
+            separator, or has an empty provider or model segment.
     """
+    if not isinstance(spec, str):
+        raise InvalidModelSpecError(
+            repr(spec), f"expected a string, got {type(spec).__name__}"
+        )
     text = spec.strip()
     if not text:
         raise InvalidModelSpecError(spec, "the spec is empty")

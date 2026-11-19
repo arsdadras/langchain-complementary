@@ -1,14 +1,15 @@
 """Dual-mechanism onion middleware system for langcomp.
 
 Provides:
-- :class:`AgentMiddleware` for composing capabilities (tools, state schemas, hooks).
+- :class:`AgentMiddleware` for composing capabilities (tools, state schemas, sync/async hooks).
 - Immutable typed contracts (:class:`ModelRequest`, :class:`ModelResponse`,
   :class:`ToolCallRequest`, :class:`ToolCallResponse`, :class:`JumpTo`).
 - Functional single-hook decorators (:func:`before_agent`, :func:`before_model`,
   :func:`wrap_model_call`, :func:`after_model`, :func:`wrap_tool_call`,
   :func:`after_agent`, :func:`dynamic_prompt`).
 - Onion composition helpers (:func:`compose_model_wrappers`,
-  :func:`compose_tool_wrappers`, :func:`normalize_middleware`).
+  :func:`compose_async_model_wrappers`, :func:`compose_tool_wrappers`,
+  :func:`compose_async_tool_wrappers`, :func:`normalize_middleware`).
 - Built-in adapters for langcomp's memory and tool guard primitives.
 """
 
@@ -22,6 +23,8 @@ from langcomp.middleware.builtins import (
     ToolGuardMiddleware,
 )
 from langcomp.middleware.compose import (
+    compose_async_model_wrappers,
+    compose_async_tool_wrappers,
     compose_model_wrappers,
     compose_tool_wrappers,
     normalize_middleware,
@@ -36,6 +39,8 @@ from langcomp.middleware.decorators import (
     wrap_tool_call,
 )
 from langcomp.middleware.types import (
+    AsyncModelHandler,
+    AsyncToolHandler,
     JumpTo,
     ModelHandler,
     ModelRequest,
@@ -48,6 +53,8 @@ from langcomp.middleware.types import (
 __all__ = [
     "AgentMiddleware",
     "ApprovalGateMiddleware",
+    "AsyncModelHandler",
+    "AsyncToolHandler",
     "AutoSummarizerMiddleware",
     "ContextBufferMiddleware",
     "JumpTo",
@@ -62,6 +69,8 @@ __all__ = [
     "after_model",
     "before_agent",
     "before_model",
+    "compose_async_model_wrappers",
+    "compose_async_tool_wrappers",
     "compose_model_wrappers",
     "compose_tool_wrappers",
     "dynamic_prompt",

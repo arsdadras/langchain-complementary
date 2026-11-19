@@ -1,4 +1,4 @@
-"""Example 06: Onion middleware, built-in adapters, FakeModel, and local TraceCollector.
+"""Example 06: Onion middleware, built-in adapters, lazy model specs, and local tracing.
 
 Runs completely offline with zero API keys:
     python examples/06_middleware_and_lazy_models.py
@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
 from langcomp import (
+    DEFAULT_MODEL,
     AgentBuilder,
     ApprovalGate,
     ApprovalGateMiddleware,
@@ -20,6 +21,8 @@ from langcomp import (
     ToolGuardMiddleware,
     TraceCollector,
     dynamic_prompt,
+    known_providers,
+    parse_model_spec,
     summarize,
 )
 
@@ -42,6 +45,11 @@ def contextual_prompt(req: ModelRequest) -> str:
 
 
 def main() -> None:
+    # Lazy provider registry inspection (zero SDK imports until resolve_model() is called)
+    provider, model_id = parse_model_spec(DEFAULT_MODEL)
+    print(f"Known lazy providers: {known_providers()}")
+    print(f"Parsed DEFAULT_MODEL -> provider={provider!r}, model_id={model_id!r}\n")
+
     fake_model = FakeModel(
         script=[
             AIMessage(
@@ -61,6 +69,7 @@ def main() -> None:
 
     gate = ApprovalGate(approval_func=lambda tool_name, _args: tool_name != "delete_records")
 
+    # Place ApprovalGateMiddleware outside ToolGuardMiddleware so policy checks run first
     agent = (
         AgentBuilder("GuardedCalculator")
         .with_model(fake_model)
@@ -69,8 +78,8 @@ def main() -> None:
             [
                 contextual_prompt,
                 ContextBufferMiddleware(max_messages=8),
-                ToolGuardMiddleware(max_retries=2, retry_delay_seconds=0.0),
                 ApprovalGateMiddleware(gate, guarded_tools=["delete_records"]),
+                ToolGuardMiddleware(max_retries=2, retry_delay_seconds=0.0),
             ]
         )
         .compile()

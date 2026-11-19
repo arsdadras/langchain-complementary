@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Literal
 
 from langchain_core.language_models import BaseChatModel
@@ -13,7 +14,11 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 
 ModelHandler = Callable[["ModelRequest"], "ModelResponse"]
+AsyncModelHandler = Callable[["ModelRequest"], Awaitable["ModelResponse"]]
 ToolHandler = Callable[["ToolCallRequest"], "ToolCallResponse"]
+AsyncToolHandler = Callable[["ToolCallRequest"], Awaitable["ToolCallResponse"]]
+
+_EMPTY_MAPPING: Mapping[str, Any] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,12 +33,12 @@ class JumpTo:
 
     target: Literal["end", "tools", "model"]
     messages: Sequence[AnyMessage] = ()
-    state_update: Mapping[str, Any] = field(default_factory=dict)
+    state_update: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING)
 
 
 @dataclass(frozen=True, slots=True)
 class ModelRequest:
-    """Immutable bundle passed into ``wrap_model_call`` middleware hooks.
+    """Immutable bundle passed into ``wrap_model_call`` / ``awrap_model_call`` middleware hooks.
 
     Attributes:
         messages: Sequence of messages about to be sent to the model.
@@ -41,6 +46,7 @@ class ModelRequest:
         model: Chat model or runnable instance to invoke.
         tools: Active tools available to the model.
         state: Read-only snapshot of current agent state.
+        config: Optional LangGraph/LangChain ``RunnableConfig`` for the active invocation.
     """
 
     messages: Sequence[AnyMessage]
@@ -48,6 +54,7 @@ class ModelRequest:
     model: BaseChatModel | Runnable[Any, Any]
     tools: Sequence[BaseTool]
     state: Mapping[str, Any]
+    config: Mapping[str, Any] | None = None
 
     def override(self, **changes: Any) -> ModelRequest:
         """Return a new :class:`ModelRequest` with the specified fields replaced."""
@@ -64,22 +71,24 @@ class ModelResponse:
     """
 
     message: AIMessage
-    state_update: Mapping[str, Any] = field(default_factory=dict)
+    state_update: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING)
 
 
 @dataclass(frozen=True, slots=True)
 class ToolCallRequest:
-    """Immutable bundle passed into ``wrap_tool_call`` middleware hooks.
+    """Immutable bundle passed into ``wrap_tool_call`` / ``awrap_tool_call`` middleware hooks.
 
     Attributes:
         tool: The :class:`~langchain_core.tools.BaseTool` instance to execute.
         tool_call: The raw tool-call specification emitted by the model.
         state: Read-only snapshot of current agent state.
+        config: Optional LangGraph/LangChain ``RunnableConfig`` for the active invocation.
     """
 
     tool: BaseTool
     tool_call: ToolCall
     state: Mapping[str, Any]
+    config: Mapping[str, Any] | None = None
 
     def override(self, **changes: Any) -> ToolCallRequest:
         """Return a new :class:`ToolCallRequest` with the specified fields replaced."""
@@ -93,7 +102,10 @@ class ToolCallResponse:
     Attributes:
         message: The :class:`~langchain_core.messages.ToolMessage` produced.
         state_update: Optional extra state fields to merge into agent state.
+        approval_rejected: Structured flag indicating the call was denied by an
+            approval policy (never retried or replaced with a fallback by guardrails).
     """
 
     message: ToolMessage
-    state_update: Mapping[str, Any] = field(default_factory=dict)
+    state_update: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING)
+    approval_rejected: bool = False

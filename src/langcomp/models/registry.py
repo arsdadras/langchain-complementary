@@ -1,12 +1,16 @@
-"""Lazy provider registry and registration helpers for langcomp."""
+"""Thread-safe lazy provider registry and registration helpers for langcomp."""
 
 from __future__ import annotations
 
+import threading
 from types import MappingProxyType
 from typing import Final
 
 from langcomp.errors import ConfigurationError
+from langcomp.models.constants import SPEC_SEPARATOR
 from langcomp.models.spec import ProviderSpec
+
+_REGISTRY_LOCK = threading.RLock()
 
 PROVIDERS: Final[dict[str, ProviderSpec]] = {
     "google_genai": ProviderSpec(
@@ -38,7 +42,14 @@ PROVIDERS: Final[dict[str, ProviderSpec]] = {
 
 def known_providers() -> tuple[str, ...]:
     """Return the provider names currently registered with langcomp."""
-    return tuple(PROVIDERS)
+    with _REGISTRY_LOCK:
+        return tuple(PROVIDERS)
+
+
+def get_provider(name: str) -> ProviderSpec | None:
+    """Thread-safely retrieve a registered provider specification by name."""
+    with _REGISTRY_LOCK:
+        return PROVIDERS.get(name)
 
 
 def register_provider(
@@ -55,14 +66,25 @@ def register_provider(
         overwrite: Allow replacing an existing provider entry when ``True``.
 
     Raises:
-        ConfigurationError: If ``name`` is blank or already registered without
-            ``overwrite=True``.
+        ConfigurationError: If ``name`` is blank, contains ``":"``, or is already
+            registered without ``overwrite=True``.
     """
     normalized = name.strip()
     if not normalized:
         raise ConfigurationError("Provider name must not be empty.")
-    if normalized in PROVIDERS and not overwrite:
+    if SPEC_SEPARATOR in normalized:
         raise ConfigurationError(
-            f"Provider {normalized!r} is already registered. Pass overwrite=True to replace it."
+            f"Provider name {normalized!r} must not contain separator {SPEC_SEPARATOR!r}."
         )
-    PROVIDERS[normalized] = spec
+    with _REGISTRY_LOCK:
+        if normalized in PROVIDERS and not overwrite:
+            raise ConfigurationError(
+                f"Provider {normalized!r} is already registered. Pass overwrite=True to replace it."
+            )
+        PROVIDERS[normalized] = spec
+
+
+def unregister_provider(name: str) -> ProviderSpec | None:
+    """Remove a registered provider by name and return its specification if present."""
+    with _REGISTRY_LOCK:
+        return PROVIDERS.pop(name.strip(), None)

@@ -87,3 +87,7 @@ class UnknownToolError(LangcompError):
             f"Model called unknown tool {tool_name!r}. Registered tools: "
             f"{', '.join(sorted(known)) or '(none)'}."
         )
+
+
+class ToolExecutionError(LangcompError, RuntimeError):
+    """Raised when a guarded tool fails all retry attempts without a fallback."""

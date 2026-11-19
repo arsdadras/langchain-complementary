@@ -18,10 +18,12 @@ from langcomp import (
     ApprovalRejectedError,
     AutoSummarizer,
     AutoSummarizerMiddleware,
+    ConfigurationError,
     ContextBuffer,
     ContextBufferMiddleware,
     FakeModel,
     JumpTo,
+    ModelHandler,
     ModelRequest,
     ModelResponse,
     State,
@@ -29,6 +31,7 @@ from langcomp import (
     ToolCallResponse,
     ToolGuard,
     ToolGuardMiddleware,
+    ToolHandler,
     after_agent,
     after_model,
     before_agent,
@@ -628,3 +631,185 @@ def test_approval_gate_middleware_blocks_unapproved_and_allows_approved() -> Non
     assert by_id["c1"].status == "error"
     assert "PermissionDenied" in str(by_id["c1"].content)
     assert by_id["c2"].content == "echo: safe"
+
+
+def test_tool_guard_does_not_retry_or_fallback_on_non_raising_approval_rejection() -> None:
+    checks = 0
+
+    def deny(_name: str, _args: dict[str, Any]) -> bool:
+        nonlocal checks
+        checks += 1
+        return False
+
+    fake = FakeModel(
+        script=[
+            AIMessage("", tool_calls=[{"id": "c1", "name": "dangerous_tool", "args": {"cmd": "x"}}]),
+            AIMessage("Blocked safely."),
+        ]
+    )
+    ag = create_agent(
+        model=fake,
+        tools=[dangerous_tool],
+        middleware=[
+            ToolGuardMiddleware(max_retries=3, fallback_output="BYPASSED", retry_delay_seconds=0.0),
+            ApprovalGateMiddleware(ApprovalGate(approval_func=deny), guarded_tools=["dangerous_tool"]),
+        ],
+    )
+    res = ag.invoke("run")
+    tool_msg = next(m for m in res["messages"] if isinstance(m, ToolMessage))
+    assert checks == 1
+    assert tool_msg.status == "error"
+    assert "BYPASSED" not in str(tool_msg.content)
+
+
+def test_before_agent_and_after_agent_preserve_messages_and_reject_after_agent_jump() -> None:
+    seen: list[list[str]] = []
+
+    @before_agent
+    def mw1(state: Mapping[str, Any]) -> dict[str, Any]:
+        del state
+        return {"messages": [HumanMessage(content="injected")]}
+
+    @before_agent
+    def mw2(state: Mapping[str, Any]) -> None:
+        seen.append([str(m.content) for m in state["messages"]])
+        return None
+
+    ag = create_agent(FakeModel(script=["ok"]), middleware=[mw1, mw2])
+    ag.invoke("original")
+    assert seen == [["original", "injected"]]
+
+    @after_agent
+    def bad_jump(state: Mapping[str, Any]) -> JumpTo:
+        del state
+        return JumpTo("model")
+
+    ag_bad = create_agent(FakeModel(script=["ok"]), middleware=[bad_jump])
+    with pytest.raises(ConfigurationError, match="after_agent middleware cannot return JumpTo"):
+        ag_bad.invoke("hi")
+
+
+def test_builtin_middleware_rejects_conflicting_instance_and_kwargs() -> None:
+    from langcomp import AutoSummarizer, ContextBuffer, ToolGuard
+    from langcomp.middleware.compose import normalize_middleware
+
+    with pytest.raises(ConfigurationError, match="ContextBufferMiddleware"):
+        ContextBufferMiddleware(buffer=ContextBuffer(max_messages=5), max_messages=10)
+    with pytest.raises(ConfigurationError, match="AutoSummarizerMiddleware"):
+        AutoSummarizerMiddleware(summarizer=AutoSummarizer(trigger_threshold=5), keep_recent=2)
+    with pytest.raises(ConfigurationError, match="ToolGuardMiddleware"):
+        ToolGuardMiddleware(guard=ToolGuard(max_retries=2), max_retries=5)
+    with pytest.raises(TypeError, match="Expected AgentMiddleware"):
+        normalize_middleware("not-middleware")  # type: ignore[arg-type]
+
+
+async def test_async_middleware_hooks_and_bridged_sync_middleware() -> None:
+    events: list[str] = []
+
+    @before_agent
+    async def a_before_agent(state: Mapping[str, Any]) -> None:
+        del state
+        events.append("abefore_agent")
+
+    @before_model
+    async def a_before_model(state: Mapping[str, Any]) -> None:
+        del state
+        events.append("abefore_model")
+
+    @dynamic_prompt
+    async def a_prompt(req: ModelRequest) -> str:
+        del req
+        events.append("aprompt")
+        return "async-system"
+
+    @wrap_model_call
+    def sync_outer(req: ModelRequest, handler: ModelHandler) -> ModelResponse:
+        events.append("sync_outer_in")
+        resp = handler(req)
+        events.append("sync_outer_out")
+        return resp
+
+    @after_model
+    async def a_after_model(state: Mapping[str, Any]) -> None:
+        del state
+        events.append("aafter_model")
+
+    @after_agent
+    async def a_after_agent(state: Mapping[str, Any]) -> None:
+        del state
+        events.append("aafter_agent")
+
+    async def async_policy(_name: str, args: dict[str, Any]) -> bool:
+        return args.get("text") != "forbidden"
+
+    fake = FakeModel(
+        script=[
+            AIMessage("", tool_calls=[{"id": "c1", "name": "echo_tool", "args": {"text": "ok"}}]),
+            AIMessage("final-async"),
+        ]
+    )
+    ag = create_agent(
+        model=fake,
+        tools=[echo_tool],
+        middleware=[
+            a_before_agent,
+            a_before_model,
+            a_prompt,
+            sync_outer,
+            a_after_model,
+            a_after_agent,
+            ContextBufferMiddleware(max_messages=10),
+            ToolGuardMiddleware(max_retries=2, retry_delay_seconds=0.0),
+            ApprovalGateMiddleware(ApprovalGate(approval_func=async_policy)),
+        ],
+    )
+    result = await ag.ainvoke("hi async")
+    assert result["messages"][-1].content == "final-async"
+    assert fake.calls[0][0] == SystemMessage("async-system")
+    assert events[0] == "abefore_agent"
+    assert events[-1] == "aafter_agent"
+    assert "aprompt" in events
+    assert "sync_outer_in" in events
+    assert "sync_outer_out" in events
+
+    # Async hook called synchronously fails cleanly with ConfigurationError
+    ag_sync_fail = create_agent(FakeModel(script=["x"]), middleware=[a_before_model])
+    with pytest.raises(ConfigurationError, match="cannot be executed synchronously"):
+        ag_sync_fail.invoke("hi")
+
+
+def test_parallel_tool_calls_respect_state_reducers() -> None:
+    import operator
+
+    class LogState(State):
+        logs: list[str] = []
+
+    class TaggingToolMW(AgentMiddleware):
+        def wrap_tool_call(self, request: ToolCallRequest, handler: ToolHandler) -> ToolCallResponse:
+            resp = handler(request)
+            return ToolCallResponse(
+                message=resp.message,
+                state_update={"logs": [request.tool_call["id"]]},
+            )
+
+    fake = FakeModel(
+        script=[
+            AIMessage(
+                "",
+                tool_calls=[
+                    {"id": "c1", "name": "echo_tool", "args": {"text": "a"}},
+                    {"id": "c2", "name": "echo_tool", "args": {"text": "b"}},
+                ],
+            ),
+            AIMessage("done"),
+        ]
+    )
+    ag = create_agent(
+        model=fake,
+        tools=[echo_tool],
+        state_schema=LogState,
+        middleware=[TaggingToolMW()],
+    )
+    assert operator.add is not None
+    res = ag.invoke("go")
+    assert res["logs"] == ["c1", "c2"]

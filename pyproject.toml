@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25.0,<2.0.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -12,11 +12,27 @@ authors = [
 ]
 license = { text = "MIT" }
 requires-python = ">=3.10"
-dependencies = [
-    "langchain-core>=0.3.0",
-    "langgraph>=0.2.0",
-    "pydantic>=2.0.0",
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
 ]
+dependencies = [
+    "langchain-core>=0.3.0,<2.0.0",
+    "langgraph>=0.2.0,<2.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ar-sdadras/langchain-complementary"
+Repository = "https://github.com/ar-sdadras/langchain-complementary"
+Issues = "https://github.com/ar-sdadras/langchain-complementary/issues"
 
 [project.optional-dependencies]
 google = [
@@ -30,7 +46,7 @@ sqlite = [
 ]
 postgres = [
     "langgraph-checkpoint-postgres>=2.0.0",
-    "psycopg[binary]>=3.1.0",
+    "psycopg[binary]>=3.1.0,<4.0.0",
 ]
 deepagents = [
     "deepagents>=0.1.0; python_version >= '3.11'",
@@ -39,19 +55,20 @@ visualizer = [
     "grandalf>=0.8.0",
 ]
 dev = [
+    "mypy>=1.11.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "python-dotenv>=1.0.0",
     "ruff>=0.8.0",
 ]
 all = [
-    "langcomp[google,openai,sqlite,postgres,deepagents,visualizer,dev]",
+    "langcomp[google,openai,sqlite,postgres,deepagents,visualizer]",
 ]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --asyncio-mode=auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = [
     "tests",
 ]
@@ -61,8 +78,26 @@ target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "B", "UP"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/langcomp"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".env",
+    ".env.*",
+    ".langcomp",
+    ".coverage",
+    ".idea",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+]

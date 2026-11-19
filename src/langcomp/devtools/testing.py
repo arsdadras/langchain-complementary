@@ -1,7 +1,19 @@
-"""
-Re-export of langcomp.testing utilities under langcomp.devtools.testing.
+"""Deprecated re-export shim for :mod:`langcomp.testing`.
+
+Import ``FakeModel``, ``ScriptTurn``, ``run_and_snapshot``, and ``arun_and_snapshot``
+directly from :mod:`langcomp.testing` or top-level :mod:`langcomp`.
 """
 
-from langcomp.testing import FakeModel, ScriptTurn, run_and_snapshot
+from __future__ import annotations
 
-__all__ = ["FakeModel", "ScriptTurn", "run_and_snapshot"]
+import warnings
+
+from langcomp.testing import FakeModel, ScriptTurn, arun_and_snapshot, run_and_snapshot
+
+warnings.warn(
+    "langcomp.devtools.testing is deprecated; import from langcomp.testing or langcomp instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+__all__ = ["FakeModel", "ScriptTurn", "arun_and_snapshot", "run_and_snapshot"]

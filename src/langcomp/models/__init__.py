@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from langcomp.models.constants import CAPABLE_MODEL, DEFAULT_MODEL, SPEC_SEPARATOR
-from langcomp.models.registry import PROVIDERS, known_providers, register_provider
+from langcomp.models.registry import (
+    PROVIDERS,
+    get_provider,
+    known_providers,
+    register_provider,
+    unregister_provider,
+)
 from langcomp.models.resolver import resolve_model
 from langcomp.models.spec import ProviderSpec, parse_model_spec
 
@@ -13,8 +19,10 @@ __all__ = [
     "PROVIDERS",
     "SPEC_SEPARATOR",
     "ProviderSpec",
+    "get_provider",
     "known_providers",
     "parse_model_spec",
     "register_provider",
     "resolve_model",
+    "unregister_provider",
 ]

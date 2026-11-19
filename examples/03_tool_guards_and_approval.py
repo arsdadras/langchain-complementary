@@ -1,61 +1,64 @@
 """
 Example 03: Tool Guardrails & Human Approval Gates.
-Demonstrates wrapping flaky tools with automatic retries and fallback outputs.
+Demonstrates non-mutating ToolGuard retries and fail-closed ApprovalGate wrapping.
+Runs completely offline with zero API keys.
 """
 
-from langcomp import ApprovalGate, ToolGuard
+from __future__ import annotations
 
-attempt_counter = 0
+from typing import Any
 
+from langchain_core.tools import tool
 
-def unstable_external_api(endpoint: str) -> str:
-    global attempt_counter
-    attempt_counter += 1
-    print(f"  [API Call Attempt {attempt_counter}] Calling endpoint: {endpoint}")
-    if attempt_counter < 3:
-        raise ConnectionError("Network timeout connecting to external server.")
-    return f"Successfully fetched data from {endpoint}"
+from langcomp import ApprovalGate, ApprovalRejectedError, ToolGuard
 
 
-def sensitive_db_drop(database_name: str) -> str:
-    return f"Database '{database_name}' dropped successfully."
-
-
-def main():
+def main() -> None:
     print("=== langcomp Example 03: Tool Guards & Approval Gates ===")
 
     # 1. ToolGuard Demonstration
     print("\n--- 1. Guarding Flaky Tools with Auto-Retries ---")
-    guard = ToolGuard(max_retries=3, retry_delay_seconds=0.1)
+    attempts = 0
+
+    def unstable_external_api(endpoint: str) -> str:
+        nonlocal attempts
+        attempts += 1
+        print(f"  [API Call Attempt {attempts}] Calling endpoint: {endpoint}")
+        if attempts < 3:
+            raise ConnectionError("Network timeout connecting to external server.")
+        return f"Successfully fetched data from {endpoint}"
+
+    guard = ToolGuard(max_retries=3, retry_delay_seconds=0.0)
     guarded_api = guard.wrap_function(unstable_external_api)
 
     result = guarded_api("https://api.example.com/v1/data")
     print(f"Guarded Call Result: {result}")
 
-    # 2. ApprovalGate Demonstration
+    # 2. Fail-Closed ApprovalGate with wrap_tool()
     print("\n--- 2. Human-In-The-Loop Approval Gate ---")
 
-    def user_approval_callback(action_name: str, params: dict) -> bool:
+    def user_approval_callback(action_name: str, params: dict[str, Any]) -> bool:
         print(f"  [APPROVAL REQUEST] Action: '{action_name}', Params: {params}")
-        # Simulating approval rule: only approve if database is a test environment
-        if "test" in params.get("db_name", ""):
+        if "test" in str(params.get("database_name", "")):
             print("  [DECISION] APPROVED (Test database)")
             return True
         print("  [DECISION] DENIED (Production database protected!)")
         return False
 
+    @tool
+    def drop_database(database_name: str) -> str:
+        """Drop a target database by name."""
+        return f"Database '{database_name}' dropped successfully."
+
     gate = ApprovalGate(approval_func=user_approval_callback)
+    gated_drop = gate.wrap_tool(drop_database)
 
-    # Test approving test database operation
-    db_params = {"db_name": "test_db_v1"}
-    if gate.check_approval("drop_database", db_params):
-        res = sensitive_db_drop(db_params["db_name"])
-        print(f"Action Execution Output: {res}")
+    print(f"Action Execution Output: {gated_drop.invoke({'database_name': 'test_db_v1'})}")
 
-    # Test denying prod database operation
-    prod_params = {"db_name": "prod_users_primary"}
-    if not gate.check_approval("drop_database", prod_params):
-        print("Action blocked by Approval Gate: Action aborted safely.")
+    try:
+        gated_drop.invoke({"database_name": "prod_users_primary"})
+    except ApprovalRejectedError as exc:
+        print(f"Action blocked by Approval Gate: {exc}")
 
 
 if __name__ == "__main__":

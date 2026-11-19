@@ -1,53 +1,54 @@
-# Chapter 02: Multi-Agent Swarms & Subagent Delegation
+# Chapter 02: Multi-Agent Swarms & Hierarchical Teams
 
-In this chapter, you will learn how to orchestrate multi-agent swarms using `SwarmPool` and `SubAgent` to achieve clean context isolation.
+In this chapter, you will orchestrate multi-agent systems in two complementary ways:
+
+1. **`SwarmPool` & `SubAgent`** — flat, context-isolated tool delegation that works with any `langcomp` `Agent`, LangGraph runnable, or plain Python sync/async callable.
+2. **`Team`** — arbitrarily nested hierarchical subagent trees with transitive configuration inheritance, compiled over **DeepAgents** via `Team.compile()`.
 
 ---
 
-## 🎯 The Context Bloat Problem
+## The Context Bloat Problem
 
-In complex multi-agent applications, passing all messages between supervisor and worker agents can quickly exhaust the LLM's context window.
+Sharing raw message histories between a supervisor and multiple specialist workers quickly exhausts context windows and confuses downstream prompts.
 
 ```mermaid
 graph LR
-    subgraph Bad Approach: Shared Context
-        S1[Supervisor] <-->|All Messages| W1[Worker A]
-        S1 <-->|All Messages| W2[Worker B]
+    subgraph Shared["Shared Context (Context Bloat)"]
+        S1["Supervisor"] <-->|All Messages| W1["Worker A"]
+        S1 <-->|All Messages| W2["Worker B"]
     end
-    
-    subgraph Good Approach: Subagent Tool Isolation
-        S2[Supervisor] -->|Query| Sub1[Subagent Tool A]
-        Sub1 -->|Isolated Context Output| S2
-        S2 -->|Query| Sub2[Subagent Tool B]
-        Sub2 -->|Isolated Context Output| S2
+
+    subgraph Isolated["Subagent Tool Isolation"]
+        S2["Supervisor"] -->|Task Query| Sub1["SubAgent Tool A"]
+        Sub1 -->|Final Summary Only| S2
+        S2 -->|Task Query| Sub2["SubAgent Tool B"]
+        Sub2 -->|Final Summary Only| S2
     end
 ```
 
-`langcomp.swarm` solves this by converting subagents into context-isolated tools that can be registered in a pool and called dynamically.
+Each `SubAgent` executes with its own isolated `thread_id` (auto-generated per call unless explicitly provided) and returns only its final output string to the supervisor.
 
 ---
 
-## 🐝 1. Registering Subagents with `SwarmPool`
+## 1. Registering Subagents with `SwarmPool`
 
-`SwarmPool` manages registered subagents and exposes their capabilities as standard LangChain tools.
+`SwarmPool` is a thread-safe registry for subagents (`Agent`, compiled LangGraph runnables, or plain sync/async callables). Names must match `^[A-Za-z0-9_-]{1,64}$`, and duplicate registrations raise `ConfigurationError` unless `overwrite=True` is passed.
 
 ```python
 from langchain_core.messages import AIMessage
 from langcomp import AgentBuilder, SwarmPool
 
-# 1. Define specialized worker agents
 def researcher_logic(state):
     query = state["messages"][-1].content
-    return {"messages": [AIMessage(content=f"Research Findings for '{query}': Found 3 key papers.")]}
+    return {"messages": [AIMessage(content=f"Research findings for '{query}': 3 key papers.")]}
 
 def coder_logic(state):
     query = state["messages"][-1].content
-    return {"messages": [AIMessage(content=f"Generated Code for '{query}': def solution(): pass")]}
+    return {"messages": [AIMessage(content=f"Generated code for '{query}': def solve(): pass")]}
 
 researcher_agent = AgentBuilder("ResearcherAgent").add_node("res", researcher_logic).compile()
 coder_agent = AgentBuilder("CoderAgent").add_node("code", coder_logic).compile()
 
-# 2. Instantiate SwarmPool and register subagents
 pool = SwarmPool("DevTeamSwarm")
 
 pool.register(
@@ -56,88 +57,219 @@ pool.register(
     agent_or_callable=researcher_agent,
     capabilities=["search", "documentation"],
 )
-
 pool.register(
     name="programmer",
     description="Specialized in writing and debugging Python code",
     agent_or_callable=coder_agent,
     capabilities=["python", "coding"],
 )
+
+print(len(pool), "researcher" in pool)  # 2 True
+print(pool.list_subagents())
 ```
 
 ---
 
-## 🛠️ 2. Exporting Subagent Tools for Supervisor Agents
+## 2. Running `SubAgent` Synchronously & Asynchronously (`run`, `arun`, `as_tool`)
 
-To let a main supervisor agent invoke subagents dynamically, retrieve tools from the pool:
+Every registered entry is a `SubAgent` instance supporting:
+
+- `sub.run(query, thread_id=None, config=None)` — synchronous execution
+- `await sub.arun(query, thread_id=None, config=None)` — native async execution (supports `Agent.ainvoke`, runnable `.ainvoke`, and async callables)
+- `sub.as_tool()` — converts the subagent into a sync + async LangChain `StructuredTool` accepting `task_description: str`
 
 ```python
-# Convert all subagents into standard LangChain tools
-tools = pool.get_tools()
+import asyncio
+from langcomp import SubAgent
 
-for t in tools:
-    print(f"Tool Name: {t.name}")
-    print(f"Description: {t.description}\n")
+async def async_linter(code: str) -> str:
+    return f"Lint OK ({len(code)} chars)"
+
+linter_sub = SubAgent(
+    name="linter",
+    description="Checks Python code style asynchronously",
+    agent_instance=async_linter,
+)
+
+# Direct async execution
+async def run_subagents() -> None:
+    report = await linter_sub.arun("def solve(): pass")
+    print(report)  # Output: Lint OK (17 chars)
+
+    # Also works via the exported StructuredTool's async interface
+    linter_tool = linter_sub.as_tool()
+    tool_out = await linter_tool.ainvoke({"task_description": "x = 1"})
+    print(tool_out)  # Output: Lint OK (5 chars)
+
+asyncio.run(run_subagents())
 ```
 
-### Invoking a Subagent Tool
+### Wiring `SwarmPool` into a Supervisor Agent
+
+Call `pool.get_tools()` and pass the tools straight into `langcomp.create_agent()`:
 
 ```python
-research_tool = tools[0]
+from langchain_core.messages import AIMessage
+from langcomp import FakeModel, create_agent
 
-# Execute subagent tool with task description
-result = research_tool.invoke({"task_description": "Summarize attention mechanism in Transformers"})
-print(result)
-# Output: Research Findings for 'Summarize attention mechanism in Transformers': Found 3 key papers.
+# Offline-runnable supervisor using FakeModel (swap for "openai:gpt-4o-mini" in production)
+supervisor_model = FakeModel(
+    script=[
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "researcher",
+                    "args": {"task_description": "Summarize attention in Transformers"},
+                    "id": "call_1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        "Summary complete: the researcher found 3 key papers.",
+    ]
+)
+
+supervisor = create_agent(
+    model=supervisor_model,
+    tools=pool.get_tools(),
+    system_prompt="Delegate research and coding tasks to the specialist tools.",
+    name="Supervisor",
+)
+
+result = supervisor.invoke("Summarize attention in Transformers")
+print(result["messages"][-1].content)
+# Output: Summary complete: the researcher found 3 key papers.
 ```
 
 ---
 
-## 💡 3. Interoperability with Modern LangChain `create_agent()` and `DeepAgents`
+## 3. `langcomp.create_agent` vs `langchain.agents.create_agent` & Interop
 
-Modern LangChain 1.x (`create_agent()`) and **DeepAgents** (`create_deep_agent()`) introduce built-in `SubAgentMiddleware` and `CompiledSubAgent` patterns.
+Because both `langcomp` and LangChain 1.x export a function named `create_agent`, it helps to know how they relate:
 
-`langcomp` provides full native interoperability with both:
+| Factory | Returns | Best for |
+| :--- | :--- | :--- |
+| `langcomp.create_agent(...)` | `langcomp.Agent` (wrapping a hand-built `CompiledStateGraph`) | Lazy `"provider:model"` resolution, `langcomp` onion middleware (`AgentMiddleware`, `JumpTo`, built-in adapters), automatic `State` default hydration, explicit `thread_id` safety |
+| `langchain.agents.create_agent(...)` / `deepagents.create_deep_agent(...)` | Raw compiled LangGraph runnable | Using upstream LangChain 1.x or DeepAgents runtimes directly |
 
-### Exporting `langcomp` SubAgents to DeepAgents / LangChain Middleware
+`langcomp` interoperates seamlessly in **both** directions:
+
+### Exporting `SubAgent`s to DeepAgents
 
 ```python
-from langcomp import SwarmPool, SubAgent
+from langcomp import SwarmPool
 
-pool = SwarmPool("CrossFrameworkPool")
-sub = pool.register(
+def security_reviewer_logic(code: str) -> str:
+    return f"No critical vulnerabilities found in snippet ({len(code)} chars)."
+
+interop_pool = SwarmPool("CrossFrameworkPool")
+reviewer = interop_pool.register(
     name="security_reviewer",
     description="Reviews code for security issues and line-level severity",
-    agent_or_callable=my_reviewer_logic,
+    agent_or_callable=security_reviewer_logic,
 )
 
-# Export as dictionary compatible with DeepAgents SubAgentMiddleware
-deepagents_sub_dict = sub.to_deepagents_subagent_dict()
-# Pass directly into DeepAgents or LangChain create_agent():
-# agent = create_deep_agent(model="gemini-3.6-flash", subagents=[deepagents_sub_dict])
+# Produces a CompiledSubAgent-shaped dict (for Agent/runnables)
+# or a declarative dict with system_prompt (for plain callables)
+deepagents_sub_dict = reviewer.to_deepagents_subagent_dict()
+
+# Pass directly into DeepAgents (requires: pip install 'langcomp[deepagents]'):
+# from deepagents import create_deep_agent
+# deep_graph = create_deep_agent(
+#     model="google_genai:gemini-2.5-flash",
+#     subagents=[deepagents_sub_dict],
+# )
 ```
 
-### Wrapping `create_agent()` / `create_deep_agent()` Runnables into `langcomp`
+### Wrapping External Runnables into `langcomp.Agent`
+
+Any compiled LangChain 1.x `create_agent()` runnable or DeepAgents graph can be wrapped with `Agent.from_runnable()` to gain normalized payload handling, `GraphVisualizer`, and `DryRunner`:
 
 ```python
-from langchain.agents import create_agent
+from langchain_core.tools import tool
 from langcomp import Agent
 
-# Create an agent using modern LangChain 1.x
-lc_agent_runnable = create_agent(
-    model="claude-sonnet-4-6",
-    tools=[my_tool],
-)
+@tool
+def lookup_status(service: str) -> str:
+    """Return current health status for a service."""
+    return f"{service}: healthy"
 
-# Wrap into langcomp Agent to enable local ASCII/Mermaid visualizers & DryRunner
-langcomp_agent = Agent.from_runnable(lc_agent_runnable, name="WrappedLCAgent")
+# Example with LangChain 1.x create_agent (when `langchain` is installed):
+# from langchain.agents import create_agent as lc_create_agent
+# lc_runnable = lc_create_agent(model="openai:gpt-4o-mini", tools=[lookup_status])
+# wrapped = Agent.from_runnable(lc_runnable, name="WrappedLCAgent")
 ```
 
 ---
 
-## 📌 Summary Checklist
+## 4. Hierarchical Multi-Agent Trees with `Team`
 
-- [x] Understand how subagent tool execution prevents supervisor context bloat.
-- [x] Register subagents into `SwarmPool` and export them as LangChain tools.
-- [x] Export `SubAgent` dicts for modern LangChain `create_agent()` and `DeepAgents` `SubAgentMiddleware`.
+When a flat pool is not enough, `langcomp.Team` lets you model arbitrarily nested hierarchies (e.g., Director -> Leads -> Specialists) and compile the entire tree into a **DeepAgents** graph with `Team.compile()`.
 
+### Key Features of `Team`
+
+- **Transitive Inheritance:** Optional fields (`system_prompt`, `tools`, `model`, `skills`, `middleware`) automatically inherit from parent to child unless explicitly overridden on a child `Team`.
+- **Recursive Compilation:** Intermediate teams with `children` compile into DeepAgents `CompiledSubAgent` graphs; leaf teams compile into declarative subagent specs.
+- **Built-in Safety Checks:**
+  - Rejects duplicate sibling names and empty names (`ValueError`).
+  - Rejects `"general-purpose"` as a child name so it cannot silently shadow DeepAgents' built-in general-purpose subagent (`ValueError`).
+  - Detects cycles in `children` and enforces a maximum nesting depth of 32 (`ConfigurationError`).
+
+> [!NOTE]
+> Constructing and inspecting `Team` trees requires only core `langcomp`. Calling `Team.compile()` lazily imports `deepagents` and requires `pip install 'langcomp[deepagents]'` (Python >= 3.11).
+
+```python
+from langchain_core.tools import tool
+from langcomp import Agent, Team
+
+@tool
+def search_docs(query: str) -> str:
+    """Search internal engineering documentation."""
+    return f"Doc hits for: {query}"
+
+# Leaf specialists inherit model & tools unless overridden
+api_specialist = Team(
+    name="api_specialist",
+    description="Designs REST and GraphQL contracts",
+    system_prompt="Focus on API schemas, pagination, and backwards compatibility.",
+)
+
+db_specialist = Team(
+    name="db_specialist",
+    description="Designs relational schemas and indexes",
+    system_prompt="Focus on PostgreSQL normalization, indexing, and query plans.",
+)
+
+# Intermediate lead owns child specialists
+backend_lead = Team(
+    name="backend_lead",
+    description="Coordinates API and database engineering",
+    system_prompt="Delegate API and DB questions to your specialists and synthesize.",
+    children=[api_specialist, db_specialist],
+)
+
+# Root team sets shared defaults (model, tools) inherited transitively down the tree
+engineering_director = Team(
+    name="engineering_director",
+    description="Top-level architecture coordinator",
+    system_prompt="Break down architecture tasks and delegate to leads.",
+    model="openai:gpt-4o-mini",
+    tools=[search_docs],
+    children=[backend_lead],
+)
+
+# Compile into a runnable DeepAgents graph (requires `langcomp[deepagents]`):
+# deep_runnable = engineering_director.compile(checkpointer=saver)
+# director_agent = Agent.from_runnable(deep_runnable, name="EngineeringDirector")
+```
+
+You can also override the root model at compile time via `engineering_director.compile(model="google_genai:gemini-2.5-flash")`.
+
+---
+
+## Summary Checklist
+
+- [x] Use `SwarmPool` and `SubAgent` (`run`, `arun`, `as_tool`) for flat, context-isolated tool delegation.
+- [x] Understand the difference between `langcomp.create_agent()` and `langchain.agents.create_agent()`, and use `Agent.from_runnable()` / `to_deepagents_subagent_dict()` for interoperability.
+- [x] Use `Team` and `Team.compile()` for nested hierarchical multi-agent trees with transitive inheritance and cycle protection.

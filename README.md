@@ -157,7 +157,7 @@ print(summarize(collector))
 ## Examples & Docs
 
 - Runnable offline examples live in [`examples/`](./examples/)
-- Full step-by-step tutorial chapters live in [`docs/tutorial/`](./docs/tutorial/index.md)
+- Full step-by-step tutorial chapters live in [`docs/tutorial/`](./docs/tutorial/INDEX.md)
 
 ---
 
@@ -165,7 +165,7 @@ print(summarize(collector))
 
 ```bash
 uv run pytest -v
-ruff check src tests examples
+uv run ruff check src tests examples
 ```
 
 ---

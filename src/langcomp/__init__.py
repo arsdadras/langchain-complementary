@@ -3,7 +3,14 @@ langcomp: LangChain-Complementary Framework
 High-level, developer-friendly abstractions on top of LangChain, LangGraph, and DeepAgents.
 """
 
-__version__ = "0.2.0"
+from __future__ import annotations
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("langcomp")
+except PackageNotFoundError:  # pragma: no cover - source checkout without metadata
+    __version__ = "0.2.0"
 
 from langcomp.core.agent import Agent, AgentBuilder, Node, agent, create_agent, node
 from langcomp.core.state import Reduce, SmartState, State, merge_dicts, overwrite
@@ -19,13 +26,16 @@ from langcomp.errors import (
     ReducerConflictError,
     ScriptExhaustedError,
     SnapshotMismatchError,
+    ToolExecutionError,
     UnknownProviderError,
     UnknownToolError,
 )
-from langcomp.memory.buffer import AutoSummarizer, ContextBuffer
+from langcomp.memory.buffer import SUMMARY_PREFIX, AutoSummarizer, ContextBuffer
 from langcomp.middleware import (
     AgentMiddleware,
     ApprovalGateMiddleware,
+    AsyncModelHandler,
+    AsyncToolHandler,
     AutoSummarizerMiddleware,
     ContextBufferMiddleware,
     JumpTo,
@@ -48,90 +58,92 @@ from langcomp.models import (
     CAPABLE_MODEL,
     DEFAULT_MODEL,
     ProviderSpec,
+    get_provider,
     known_providers,
     parse_model_spec,
     register_provider,
     resolve_model,
+    unregister_provider,
 )
-from langcomp.persistence import checkpointer
+from langcomp.persistence import async_checkpointer, checkpointer, managed_checkpointer
 from langcomp.swarm.pool import SubAgent, SwarmPool
 from langcomp.swarm.team import Team
-from langcomp.testing import FakeModel, run_and_snapshot
+from langcomp.testing import FakeModel, ScriptTurn, arun_and_snapshot, run_and_snapshot
 from langcomp.tools.guard import ApprovalGate, ToolGuard
 
 __all__ = [
-    "__version__",
-    # Core Agent & Graph
+    "CAPABLE_MODEL",
+    "DEFAULT_MODEL",
+    "DEFAULT_PRICE_TABLE",
+    "SUMMARY_PREFIX",
     "Agent",
     "AgentBuilder",
-    "create_agent",
-    "agent",
-    "node",
-    "Node",
-    # State & Reducers
-    "State",
-    "SmartState",
-    "Reduce",
-    "overwrite",
-    "merge_dicts",
-    # Models & Lazy Provider Registry
-    "DEFAULT_MODEL",
-    "CAPABLE_MODEL",
-    "ProviderSpec",
-    "known_providers",
-    "parse_model_spec",
-    "register_provider",
-    "resolve_model",
-    # Onion Middleware & Built-in Adapters
     "AgentMiddleware",
+    "ApprovalGate",
+    "ApprovalGateMiddleware",
+    "ApprovalRejectedError",
+    "AsyncModelHandler",
+    "AsyncToolHandler",
+    "AutoSummarizer",
+    "AutoSummarizerMiddleware",
+    "ConfigurationError",
+    "ContextBuffer",
+    "ContextBufferMiddleware",
+    "DryRunner",
+    "FakeModel",
+    "GraphVisualizer",
+    "InvalidModelSpecError",
     "JumpTo",
+    "LangcompError",
+    "MissingApiKeyError",
     "ModelHandler",
     "ModelRequest",
     "ModelResponse",
+    "Node",
+    "ProviderNotInstalledError",
+    "ProviderSpec",
+    "Reduce",
+    "ReducerConflictError",
+    "ScriptExhaustedError",
+    "ScriptTurn",
+    "SmartState",
+    "SnapshotMismatchError",
+    "State",
+    "SubAgent",
+    "SwarmPool",
+    "Team",
     "ToolCallRequest",
     "ToolCallResponse",
+    "ToolExecutionError",
+    "ToolGuard",
+    "ToolGuardMiddleware",
     "ToolHandler",
+    "TraceCollector",
+    "UnknownProviderError",
+    "UnknownToolError",
+    "__version__",
+    "after_agent",
+    "after_model",
+    "agent",
+    "arun_and_snapshot",
+    "async_checkpointer",
     "before_agent",
     "before_model",
-    "wrap_model_call",
-    "after_model",
-    "wrap_tool_call",
-    "after_agent",
-    "dynamic_prompt",
-    "ContextBufferMiddleware",
-    "AutoSummarizerMiddleware",
-    "ToolGuardMiddleware",
-    "ApprovalGateMiddleware",
-    # Swarm & Hierarchical Teams
-    "SwarmPool",
-    "SubAgent",
-    "Team",
-    # Memory & Context
-    "ContextBuffer",
-    "AutoSummarizer",
-    # Tools & Guardrails
-    "ToolGuard",
-    "ApprovalGate",
-    # Persistence
     "checkpointer",
-    # DevTools, Tracing & Testing
-    "GraphVisualizer",
-    "DryRunner",
-    "TraceCollector",
-    "DEFAULT_PRICE_TABLE",
-    "summarize",
-    "FakeModel",
+    "create_agent",
+    "dynamic_prompt",
+    "get_provider",
+    "known_providers",
+    "managed_checkpointer",
+    "merge_dicts",
+    "node",
+    "overwrite",
+    "parse_model_spec",
+    "register_provider",
+    "resolve_model",
     "run_and_snapshot",
-    # Errors
-    "LangcompError",
-    "ConfigurationError",
-    "InvalidModelSpecError",
-    "UnknownProviderError",
-    "ProviderNotInstalledError",
-    "MissingApiKeyError",
-    "ReducerConflictError",
-    "SnapshotMismatchError",
-    "ScriptExhaustedError",
-    "ApprovalRejectedError",
-    "UnknownToolError",
+    "summarize",
+    "unregister_provider",
+    "wrap_model_call",
+    "wrap_tool_call",
 ]
